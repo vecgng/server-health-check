@@ -1,0 +1,7 @@
+# Ignore runtime logs
+*.log
+
+# Ignore Vim temporary files
+*.swp
+*.swo
+*~

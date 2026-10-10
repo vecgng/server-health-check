@@ -8,6 +8,12 @@ echo "=============================="
 
 status=0
 
+set_warning() {
+    if [ "$status" -eq 0 ]; then
+        status=1
+    fi
+}
+
 echo "====Server Health Check===="
 
 echo "====Uptime===="
@@ -21,42 +27,116 @@ df -h
 
 echo "====Disk Health===="
 
-disk_usage=$(df -P / | awk 'NR==2 {print $5}')
-disk_usage=${disk_usage%\%}
+if disk_info=$(df -P /); then
+	disk_usage=$(echo "$disk_info" | awk 'NR==2 {print $5}')
+	disk_usage=${disk_usage%\%}
 
-echo "====Disk Usage: ${disk_usage}%===="
 
-if [ "$disk_usage" -ge 80 ]; then
-	
-echo "WARNING: Disk usage is too high!"
-status=1
+	if [[ ! "$disk_usage" =~ ^[0-9]+$ ]]; then
+		echo "ERROR: Disk usage is empty!"
+		status=2
+	else
+		echo "====Disk Usage: ${disk_usage}%===="
+
+	if [ "$disk_usage" -ge 80 ]; then
+		echo "WARNING: Disk usage is too high!"
+		set_warning
+	else
+		echo "OK: Disk usage is normal!"
+	fi
+	fi
 else
-	echo "OK: Disk usage is normal!"
+	echo "ERROR: Failed to get disk usage!"
+	status=2
 fi
+
 
 echo "====Memory Health===="
 
-mem_usage=$(free | awk '/^Mem:/ {printf "%.0f\n",$3/$2*100}')
+if mem_info=$(free); then
+    mem_total=$(echo "$mem_info" | awk '/^Mem:/ {print $2}')
+    mem_used=$(echo "$mem_info" | awk '/^Mem:/ {print $3}')
 
-echo "====Memory Usage: ${mem_usage}%===="
+    if [[ "$mem_total" =~ ^[0-9]+$ && "$mem_used" =~ ^[0-9]+$ ]]; then
 
-if [ "$mem_usage" -ge 80 ]; then
-	echo "WARNING: Memory usage is too high!"
-status=1
+        if [ "$mem_total" -gt 0 ] &&
+           [ "$mem_used" -le "$mem_total" ]; then
+
+            mem_usage=$(awk -v total="$mem_total" -v used="$mem_used" \
+                'BEGIN {printf "%.0f\n", used / total * 100}')
+
+            echo "====Memory Usage: ${mem_usage}%===="
+
+            if [ "$mem_usage" -ge 80 ]; then
+                echo "WARNING: Memory usage is too high!"
+		set_warning
+            else
+                echo "OK: Memory usage is normal."
+            fi
+
+        else
+            echo "ERROR: Invalid memory values!"
+            status=2
+        fi
+
+    else
+        echo "ERROR: Memory data is not numeric!"
+        status=2
+    fi
+
 else
-	echo "OK: Memory usage is normal!"
+    echo "ERROR: Failed to get memory information!"
+    status=2
 fi
+
 
 echo "====CPU Health===="
 
-cpu_usage=$(top -bn2 -d 1 | grep '%Cpu' | tail -1 | awk '{printf "%.1f\n", 100-$8}')
+if cpu_info=$(LC_ALL=C top -bn2 -d 1); then
 
-echo "==== CPU Usage: ${cpu_usage}%===="
+    cpu_idle=$(echo "$cpu_info" | awk '
 
-if awk -v cpu="$cpu_usage" 'BEGIN {exit !(cpu >= 80)}'; then
-	echo "WARNING: CPU usage is too high!"
-status=1
+    /%Cpu/ {
+            for (i=1; i<=NF; i++) {
+                if ($i == "id,") idle=$(i-1)
+            }
+        }
+        END {
+            if (idle != "") print idle
+        }')
+
+
+    if [[ "$cpu_idle" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+
+        if awk -v idle="$cpu_idle" \
+            'BEGIN {exit !(idle >= 0 && idle <= 100)}'; then
+
+            cpu_usage=$(awk -v idle="$cpu_idle" \
+                'BEGIN {printf "%.1f\n", 100-idle}')
+
+            echo "====CPU Usage: ${cpu_usage}%===="
+
+            if awk -v cpu="$cpu_usage" \
+                'BEGIN {exit !(cpu >= 80)}'; then
+                echo "WARNING: CPU usage is too high!"
+
+                set_warning
+            else
+                echo "OK: CPU usage is normal."
+            fi
+
+        else
+            echo "ERROR: Invalid CPU idle percentage!"
+            status=2
+        fi
+
+    else
+        echo "ERROR: Invalid CPU data!"
+        status=2
+    fi
+
 else
-	echo "OK: CPU usage is normal!"
+    echo "ERROR: Failed to get CPU information!"
+    status=2
 fi
 exit "$status"

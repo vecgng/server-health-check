@@ -5,3 +5,9 @@
 *.swp
 *.swo
 *~
+
+# Local backup files
+*.bak
+
+# Practice scripts
+test_function.sh
